@@ -44,8 +44,8 @@ export class ConfigValidator {
     // Log level validation
     this.addRule('level', {
       name: 'valid_log_level',
-      description: 'Log level must be one of: trace, debug, info, warn, error, fatal',
-      validate: (value: string) => ['trace', 'debug', 'info', 'warn', 'error', 'fatal'].includes(value),
+      description: 'Log level must be one of: trace, debug, info, warn, error, fatal, silent',
+      validate: (value: string) => ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'].includes(value),
       errorMessage: (value: string) => `Invalid log level: ${value}`,
       severity: 'error'
     });
@@ -195,7 +195,7 @@ export class ConfigValidator {
       errors.push(`${prefix}: Invalid stream type: ${stream.type}`);
     }
 
-    if (!stream.level || !['trace', 'debug', 'info', 'warn', 'error', 'fatal'].includes(stream.level)) {
+    if (!stream.level || !['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'].includes(stream.level)) {
       errors.push(`${prefix}: Invalid stream level: ${stream.level}`);
     }
 
@@ -337,8 +337,8 @@ export class ConfigValidator {
    * Get the lowest log level from streams array
    */
   private getLowestStreamLevel(streams: AnyStreamConfig[]): string {
-    const levels = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
-    const levelValues = { trace: 10, debug: 20, info: 30, warn: 40, error: 50, fatal: 60 };
+    const levels = ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'];
+    const levelValues = { trace: 10, debug: 20, info: 30, warn: 40, error: 50, fatal: 60, silent: Infinity };
 
     let lowestLevel = 'fatal';
     let lowestValue = levelValues.fatal;
@@ -359,7 +359,7 @@ export class ConfigValidator {
    * Returns negative if level1 < level2, positive if level1 > level2, 0 if equal
    */
   private compareLogLevels(level1: string, level2: string): number {
-    const levelValues = { trace: 10, debug: 20, info: 30, warn: 40, error: 50, fatal: 60 };
+    const levelValues = { trace: 10, debug: 20, info: 30, warn: 40, error: 50, fatal: 60, silent: Infinity };
     return levelValues[level1 as keyof typeof levelValues] - levelValues[level2 as keyof typeof levelValues];
   }
 
@@ -373,7 +373,7 @@ export class ConfigValidator {
     // Apply automatic fixes for common issues
     if (result.errors.length > 0) {
       // Fix log level if invalid
-      if (fixedConfig.level && !['trace', 'debug', 'info', 'warn', 'error', 'fatal'].includes(fixedConfig.level)) {
+      if (fixedConfig.level && !['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'].includes(fixedConfig.level)) {
         fixedConfig.level = 'info';
       }
 

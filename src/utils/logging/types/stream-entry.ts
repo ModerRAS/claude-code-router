@@ -15,12 +15,26 @@ import type { Level, DestinationStream } from 'pino';
  * different levels of logs are written.
  */
 export interface StreamEntry {
+  /** Type of the stream */
+  type: string;
   /** Minimum log level for this stream */
   level: Level;
   /** The destination stream for log output */
-  stream: DestinationStream;
+  stream?: DestinationStream;
   /** Optional name for identifying this stream */
-  name?: string;
+  name: string;
+  /** File path for file streams */
+  path?: string;
+  /** File path for file streams (alternative) */
+  filePath?: string;
+  /** Enable rotation for file streams */
+  rotation?: boolean;
+  /** Auto end stream */
+  autoEnd?: boolean;
+  /** Output to stderr for console streams */
+  stderr?: boolean;
+  /** Additional properties */
+  [key: string]: any;
 }
 
 /**

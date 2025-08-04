@@ -1,0 +1,375 @@
+# Enhanced Logging System Kubernetes Deployment
+# 用于部署具有增强日志功能的 Claude Code Router
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: claude-code-router-logging
+  labels:
+    name: claude-code-router-logging
+---
+# ConfigMap for logging configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logging-config
+  namespace: claude-code-router-logging
+data:
+  logging-config.json: |
+    {
+      "enabled": true,
+      "level": "info",
+      "timestamp": true,
+      "serviceName": "claude-code-router",
+      "version": "1.0.0",
+      "environment": "production",
+      "streams": [
+        {
+          "name": "console-output",
+          "type": "console",
+          "level": "info",
+          "stderr": false,
+          "autoEnd": true
+        },
+        {
+          "name": "error-file",
+          "type": "file",
+          "level": "error",
+          "path": "/app/logs/error.log",
+          "rotation": {
+            "size": "10M",
+            "interval": "1d"
+          },
+          "autoEnd": true
+        },
+        {
+          "name": "combined-file",
+          "type": "file",
+          "level": "info",
+          "path": "/app/logs/combined.log",
+          "rotation": {
+            "size": "50M",
+            "interval": "1d"
+          },
+          "autoEnd": true
+        }
+      ],
+      "enhancedFeatures": {
+        "requestTracking": {
+          "enabled": true,
+          "maxActiveRequests": 1000,
+          "maxContextAge": 1800000,
+          "autoCleanup": true,
+          "cleanupInterval": 300000
+        },
+        "streamTracking": {
+          "enabled": true,
+          "enableMetrics": true,
+          "enableProgressTracking": true
+        },
+        "errorLogging": {
+          "enabled": true,
+          "enableStatistics": true,
+          "enableTrendAnalysis": true,
+          "maxHistorySize": 1000
+        },
+        "performanceMetrics": {
+          "enabled": true,
+          "collectionInterval": 60000
+        }
+      }
+    }
+---
+# Secret for sensitive configuration
+apiVersion: v1
+kind: Secret
+metadata:
+  name: logging-secrets
+  namespace: claude-code-router-logging
+type: Opaque
+data:
+  # Base64 encoded values (replace with actual values)
+  api-key: eW91ci1zZWNyZXQtYXBpLWtleQ==
+  # Example: your-secret-api-key -> eW91ci1zZWNyZXQtYXBpLWtleQ==
+---
+# PersistentVolume for logs
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: logging-pv
+  namespace: claude-code-router-logging
+  labels:
+    app: logging
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: standard
+  hostPath:
+    path: /data/claude-code-router-logs
+---
+# PersistentVolumeClaim for logs
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: logging-pvc
+  namespace: claude-code-router-logging
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+---
+# ServiceAccount for the application
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: claude-code-router-sa
+  namespace: claude-code-router-logging
+---
+# Role for logging operations
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: logging-role
+  namespace: claude-code-router-logging
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get", "list"]
+---
+# RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: logging-rolebinding
+  namespace: claude-code-router-logging
+subjects:
+- kind: ServiceAccount
+  name: claude-code-router-sa
+  namespace: claude-code-router-logging
+roleRef:
+  kind: Role
+  name: logging-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: claude-code-router-logging
+  namespace: claude-code-router-logging
+  labels:
+    app: claude-code-router-logging
+    version: "1.0.0"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: claude-code-router-logging
+  template:
+    metadata:
+      labels:
+        app: claude-code-router-logging
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: claude-code-router-sa
+      containers:
+      - name: claude-code-router-logging
+        image: claude-code-router:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 3000
+          name: http
+        - containerPort: 9090
+          name: metrics
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: LOG_DIRECTORY
+          value: "/app/logs"
+        - name: LOG_RETENTION_DAYS
+          value: "30"
+        - name: LOG_MAX_FILE_SIZE
+          value: "10M"
+        - name: LOG_MAX_FILES
+          value: "10"
+        - name: ENABLE_REQUEST_TRACKING
+          value: "true"
+        - name: ENABLE_STREAM_TRACKING
+          value: "true"
+        - name: ENABLE_ERROR_ENHANCEMENT
+          value: "true"
+        - name: ENABLE_PERFORMANCE_METRICS
+          value: "true"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: logging-config
+          mountPath: /app/config
+          readOnly: true
+        - name: logging-secrets
+          mountPath: /app/secrets
+          readOnly: true
+        - name: logs-pvc
+          mountPath: /app/logs
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: logging-config
+        configMap:
+          name: logging-config
+      - name: logging-secrets
+        secret:
+          secretName: logging-secrets
+      - name: logs-pvc
+        persistentVolumeClaim:
+          claimName: logging-pvc
+      - name: tmp
+        emptyDir: {}
+      restartPolicy: Always
+---
+# Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: claude-code-router-logging-service
+  namespace: claude-code-router-logging
+  labels:
+    app: claude-code-router-logging
+spec:
+  selector:
+    app: claude-code-router-logging
+  ports:
+  - name: http
+    port: 3000
+    targetPort: 3000
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+  type: ClusterIP
+---
+# Horizontal Pod Autoscaler
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: claude-code-router-logging-hpa
+  namespace: claude-code-router-logging
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: claude-code-router-logging
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+---
+# PodDisruptionBudget
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: claude-code-router-logging-pdb
+  namespace: claude-code-router-logging
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: claude-code-router-logging
+---
+# NetworkPolicy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: claude-code-router-logging-netpol
+  namespace: claude-code-router-logging
+spec:
+  podSelector:
+    matchLabels:
+      app: claude-code-router-logging
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: default
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: TCP
+      port: 3000
+    - protocol: TCP
+      port: 9090
+  egress:
+  - {}
+---
+# ServiceMonitor for Prometheus
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: claude-code-router-logging-monitor
+  namespace: claude-code-router-logging
+  labels:
+    app: claude-code-router-logging
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: claude-code-router-logging
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+  namespaceSelector:
+    matchNames:
+    - claude-code-router-logging

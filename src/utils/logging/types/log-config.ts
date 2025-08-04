@@ -6,6 +6,7 @@
  */
 
 import type { Level } from 'pino';
+import type { BaseStreamConfig } from './stream-entry';
 
 /**
  * Main logging configuration interface
@@ -16,6 +17,18 @@ import type { Level } from 'pino';
 export interface LogConfig {
   /** Minimum log level to output (follows Pino standard levels) */
   level: LogLevel;
+  
+  /** Include timestamp in log entries */
+  timestamp: boolean;
+  
+  /** Service name for log context */
+  serviceName: string;
+  
+  /** Service version for log context */
+  version: string;
+  
+  /** Runtime environment */
+  environment: string;
   
   /** Enable automatic log file rotation */
   enableFileRotation: boolean;
@@ -40,6 +53,9 @@ export interface LogConfig {
   
   /** Whether to output logs to console */
   consoleOutput?: boolean;
+  
+  /** Stream configurations */
+  streams: StreamEntry[];
   
   /** Request tracking configuration */
   requestTracking: {
@@ -72,7 +88,8 @@ export const LOG_LEVELS = {
   info: 30,
   warn: 40,
   error: 50,
-  fatal: 60
+  fatal: 60,
+  silent: Infinity
 } as const;
 
 /**
@@ -117,25 +134,36 @@ export interface ConfigValidationResult {
 /**
  * Default log configuration values
  */
-export const DEFAULT_LOG_CONFIG: Partial<LogConfig> = {
+export const DEFAULT_LOG_CONFIG: LogConfig = {
   level: 'info',
+  timestamp: true,
+  serviceName: 'claude-code-router',
+  version: '1.0.0',
+  environment: process.env.NODE_ENV || 'development',
   enableFileRotation: true,
   retentionDays: 7,
-  logDirectory: '~/.claude-code-router/logs',
-  enableBackwardCompatibility: true,
+  logDirectory: './logs',
+  enableBackwardCompatibility: false,
   maxFileSize: '100M',
   rotationInterval: '1d',
-  compressLogs: false,
-  consoleOutput: false,
+  compressLogs: true,
+  consoleOutput: true,
+  streams: [
+    {
+      type: 'console',
+      level: 'info',
+      name: 'default-console',
+    } as BaseStreamConfig,
+  ],
   requestTracking: {
     enabled: true,
-    includeDetails: true
+    includeDetails: true,
   },
   performance: {
     bufferSize: 4096,
     flushInterval: 5000,
-    maxSessionAge: 3600000 // 1 hour
-  }
+    maxSessionAge: 3600000,
+  },
 };
 
 /**

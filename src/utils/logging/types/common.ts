@@ -16,25 +16,56 @@ export interface Result<T, E = Error> {
   error?: E;
   /** Additional context information */
   context?: Record<string, any>;
+  
+  /** Check if the operation was successful */
+  isOk(): boolean;
+  /** Check if the operation failed */
+  isErr(): boolean;
+  /** Map the value if successful */
+  map<U>(fn: (value: T) => U): Result<U, E>;
+  /** Map the error if failed */
+  mapErr<F>(fn: (error: E) => F): Result<T, F>;
+  /** Unwrap the value or throw an error */
+  unwrap(): T;
+  /** Unwrap the error or throw if successful */
+  unwrapErr(): E;
+  /** Get the value or return a default */
+  unwrapOr(defaultValue: T): T;
 }
 
 /**
  * Create a successful Result
  */
-export function Ok<T>(value: T): Result<T> {
+export function Ok<T>(value: T, context?: Record<string, any>): Result<T> {
   return {
     success: true,
     value,
+    context,
+    isOk(): boolean { return true; },
+    isErr(): boolean { return false; },
+    map<U>(fn: (value: T) => U): Result<U> { return Ok(fn(this.value!), this.context); },
+    mapErr<F>(fn: (error: Error) => F): Result<T, F> { return this as any; },
+    unwrap(): T { return this.value!; },
+    unwrapErr(): Error { throw new Error('Called unwrapErr on Ok result'); },
+    unwrapOr(defaultValue: T): T { return this.value!; },
   };
 }
 
 /**
  * Create a failed Result
  */
-export function Err<E extends Error = Error>(error: E): Result<never, E> {
+export function Err<E extends Error = Error>(error: E, context?: Record<string, any>): Result<never, E> {
   return {
     success: false,
     error,
+    context,
+    isOk(): boolean { return false; },
+    isErr(): boolean { return true; },
+    map<U>(fn: (value: never) => U): Result<U, E> { return this as any; },
+    mapErr<F>(fn: (error: E) => F): Result<never, F> { return Err(fn(this.error!), this.context); },
+    unwrap(): never { throw this.error!; },
+    unwrapErr(): E { return this.error!; },
+    unwrapOr(defaultValue: never): never { return this.error! as any; },
   };
 }
 

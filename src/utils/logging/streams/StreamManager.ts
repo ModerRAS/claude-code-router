@@ -63,20 +63,35 @@ export class StreamManager {
 
       switch (entry.type) {
         case 'file':
+          // 确保文件路径存在
+          const filePath = entry.path || entry.filePath;
+          if (!filePath) {
+            return Err(new Error(`File stream requires path or filePath: ${entry.name}`));
+          }
+          
           if (entry.rotation) {
             const rollStream = new PinoRollStream(entry);
-            await rollStream.initialize();
+            const rollResult = await rollStream.initialize();
+            if (rollResult.isErr()) {
+              return Err(rollResult.error);
+            }
             stream = rollStream.getStream();
           } else {
             const destStream = new DestinationStream(entry);
-            await destStream.initialize();
+            const destResult = await destStream.initialize();
+            if (destResult.isErr()) {
+              return Err(destResult.error);
+            }
             stream = destStream.getStream();
           }
           break;
 
         case 'console':
           const consoleStream = new ConsoleStream(entry);
-          await consoleStream.initialize();
+          const consoleResult = await consoleStream.initialize();
+          if (consoleResult.isErr()) {
+            return Err(consoleResult.error);
+          }
           stream = consoleStream.getStream();
           break;
 
@@ -212,9 +227,12 @@ export class StreamManager {
    */
   async cleanup(): Promise<void> {
     for (const [name, stream] of this.streams) {
-      if (stream.autoEnd) {
+      if (stream.autoEnd && stream.stream) {
         try {
-          stream.stream.end();
+          // 检查stream.stream是否具有end方法
+          if (typeof stream.stream.end === 'function') {
+            stream.stream.end();
+          }
         } catch (error) {
           console.error(`Error ending stream ${name}:`, error);
         }
@@ -223,6 +241,13 @@ export class StreamManager {
     
     this.streams.clear();
     this.activeStreams.clear();
+  }
+
+  /**
+   * 获取流管理器实例
+   */
+  getStream(name: string): StreamEntry | undefined {
+    return this.config.streams.find(stream => stream.name === name);
   }
 
   /**

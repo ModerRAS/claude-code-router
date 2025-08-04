@@ -1,0 +1,240 @@
+# Enhanced Logging System Docker Compose
+# 用于部署具有增强日志功能的 Claude Code Router
+
+version: '3.8'
+
+services:
+  # 主应用服务
+  claude-code-router:
+    build:
+      context: .
+      dockerfile: Dockerfile.logging
+    container_name: claude-code-router-logging
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - LOG_LEVEL=info
+      - LOG_DIRECTORY=/app/logs
+      - LOG_RETENTION_DAYS=30
+      - LOG_MAX_FILE_SIZE=10M
+      - LOG_MAX_FILES=10
+      - ENABLE_REQUEST_TRACKING=true
+      - ENABLE_STREAM_TRACKING=true
+      - ENABLE_ERROR_ENHANCEMENT=true
+      - ENABLE_PERFORMANCE_METRICS=true
+    volumes:
+      # 日志文件持久化
+      - ./logs:/app/logs
+      # 配置文件持久化
+      - ./config:/app/config
+      # 可选: 挂载外部配置
+      # - ./custom-config.json:/app/config/logging-config.json:ro
+    networks:
+      - logging-network
+    depends_on:
+      - log-rotation
+      - log-monitoring
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); })"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 日志轮转服务
+  log-rotation:
+    image: alpine:latest
+    container_name: claude-code-router-log-rotation
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs:ro
+      - ./scripts/log-rotation.sh:/usr/local/bin/log-rotation.sh:ro
+    command: >
+      sh -c "
+        chmod +x /usr/local/bin/log-rotation.sh &&
+        while true; do
+          /usr/local/bin/log-rotation.sh
+          sleep 86400 # 每天执行一次
+        done
+      "
+    networks:
+      - logging-network
+
+  # 日志监控服务
+  log-monitoring:
+    image: alpine:latest
+    container_name: claude-code-router-log-monitoring
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs:ro
+      - ./scripts/log-monitoring.sh:/usr/local/bin/log-monitoring.sh:ro
+    command: >
+      sh -c "
+        chmod +x /usr/local/bin/log-monitoring.sh &&
+        while true; do
+          /usr/local/bin/log-monitoring.sh
+          sleep 300 # 每5分钟执行一次
+        done
+      "
+    networks:
+      - logging-network
+
+  # 日志聚合服务（可选，用于集中式日志管理）
+  log-aggregator:
+    image: fluent/fluent-bit:latest
+    container_name: claude-code-router-log-aggregator
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs:ro
+      - ./config/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+    ports:
+      - "24224:24224" # Fluentd forward protocol
+      - "2020:2020" # HTTP protocol
+    networks:
+      - logging-network
+    profiles:
+      - aggregator
+
+  # Prometheus 监控（可选，用于指标收集）
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: claude-code-router-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    networks:
+      - logging-network
+    profiles:
+      - monitoring
+
+  # Grafana 可视化（可选，用于指标展示）
+  grafana:
+    image: grafana/grafana:latest
+    container_name: claude-code-router-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana:/etc/grafana/provisioning:ro
+    networks:
+      - logging-network
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+
+  # ELK Stack（可选，用于高级日志分析）
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: claude-code-router-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - logging-network
+    profiles:
+      - elk
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.11.0
+    container_name: claude-code-router-logstash
+    restart: unless-stopped
+    volumes:
+      - ./config/logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+      - ./logs:/app/logs:ro
+    depends_on:
+      - elasticsearch
+    networks:
+      - logging-network
+    profiles:
+      - elk
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: claude-code-router-kibana
+    restart: unless-stopped
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    networks:
+      - logging-network
+    profiles:
+      - elk
+
+# 网络配置
+networks:
+  logging-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# 数据卷配置
+volumes:
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  elasticsearch_data:
+    driver: local
+
+# Profile 配置，用于选择性启动服务
+profiles:
+  default:
+    services:
+      - claude-code-router
+      - log-rotation
+      - log-monitoring
+  
+  monitoring:
+    services:
+      - claude-code-router
+      - log-rotation
+      - log-monitoring
+      - prometheus
+      - grafana
+      - log-aggregator
+  
+  elk:
+    services:
+      - claude-code-router
+      - log-rotation
+      - log-monitoring
+      - elasticsearch
+      - logstash
+      - kibana
+  
+  full:
+    services:
+      - claude-code-router
+      - log-rotation
+      - log-monitoring
+      - log-aggregator
+      - prometheus
+      - grafana
+      - elasticsearch
+      - logstash
+      - kibana

@@ -8,18 +8,21 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
-import { dotenv } from 'dotenv';
+import dotenv from 'dotenv';
 import json5 from 'json5';
 
 import type {
   LogConfig,
-  ConfigValidationResult,
+  ConfigValidationResult
+} from '../types/log-config';
+import {
   DEFAULT_LOG_CONFIG,
   ENVIRONMENT_CONFIGS
 } from '../types/log-config';
 
-import type { MultiStreamConfig, DEFAULT_STREAM_CONFIGS } from '../types/stream-entry';
+import type { MultiStreamConfig, DEFAULT_STREAM_CONFIGS, StreamEntry } from '../types/stream-entry';
 import type { AsyncResult, Result, DeepPartial } from '../types/common';
+import { Ok, Err } from '../types/common';
 
 /**
  * Configuration source enumeration
@@ -55,18 +58,56 @@ export class LogConfigManager {
   private config: LogConfig;
   private configSources: ConfigSource[];
   private loadOptions: ConfigLoadOptions;
+  private configChangeListeners?: ((config: LogConfig) => void)[];
+  private streamChangeListeners?: ((streams: StreamEntry[]) => void)[];
 
-  constructor(options: ConfigLoadOptions = {}) {
-    this.loadOptions = {
-      configFilePath: path.join(os.homedir(), '.claude-code-router', 'config.json'),
-      environment: process.env.NODE_ENV || 'development',
-      loadEnvVars: true,
-      validate: true,
-      ...options
-    };
+  constructor(options: ConfigLoadOptions | LogConfig = {}) {
+    // Check if options is a LogConfig (has level property)
+    if ('level' in options && typeof options.level === 'string') {
+      // Direct configuration provided
+      this.loadOptions = {
+        configFilePath: path.join(os.homedir(), '.claude-code-router', 'config.json'),
+        environment: process.env.NODE_ENV || 'development',
+        loadEnvVars: true,
+        validate: true
+      };
+      
+      this.configSources = [ConfigSource.DEFAULT];
+      // Start with default config
+      this.config = { ...DEFAULT_LOG_CONFIG };
+      // Apply direct configuration
+      this.config = this.deepMerge(this.config, options as LogConfig);
+      // Load environment variables if enabled
+      if (this.loadOptions.loadEnvVars) {
+        const envResult = this.loadEnvironmentVariables();
+        if (envResult.success && envResult.value) {
+          this.config = this.deepMerge(this.config, envResult.value);
+          this.configSources.push(ConfigSource.ENVIRONMENT_VARIABLES);
+        }
+      }
+      // Validate configuration if enabled
+      if (this.loadOptions.validate) {
+        const validation = this.validateConfiguration(this.config);
+        if (!validation.isValid) {
+          console.warn('Log configuration validation failed:', validation.errors);
+          validation.warnings.forEach(warning => {
+            console.warn('Configuration warning:', warning);
+          });
+        }
+      }
+    } else {
+      // ConfigLoadOptions provided
+      this.loadOptions = {
+        configFilePath: path.join(os.homedir(), '.claude-code-router', 'config.json'),
+        environment: process.env.NODE_ENV || 'development',
+        loadEnvVars: true,
+        validate: true,
+        ...(options as ConfigLoadOptions)
+      };
 
-    this.configSources = [];
-    this.config = this.loadConfiguration();
+      this.configSources = [];
+      this.config = this.loadConfiguration();
+    }
   }
 
   /**
@@ -76,7 +117,7 @@ export class LogConfigManager {
     const configs: DeepPartial<LogConfig>[] = [];
 
     // 1. Start with default configuration
-    configs.push(DEFAULT_LOG_CONFIG);
+    configs.push({...DEFAULT_LOG_CONFIG});
     this.configSources.push(ConfigSource.DEFAULT);
 
     // 2. Apply environment-specific overrides
@@ -159,11 +200,14 @@ export class LogConfigManager {
       // Load .env file if it exists
       dotenv.config();
 
+      
       const envConfig: DeepPartial<LogConfig> = {};
 
       // Map environment variables to configuration
       const envMappings: Record<string, keyof LogConfig> = {
         'LOG_LEVEL': 'level',
+        'LOG_SERVICE_NAME': 'serviceName',
+        'LOG_TIMESTAMP': 'timestamp',
         'LOG_ENABLE_FILE_ROTATION': 'enableFileRotation',
         'LOG_RETENTION_DAYS': 'retentionDays',
         'LOG_DIRECTORY': 'logDirectory',
@@ -209,6 +253,10 @@ export class LogConfigManager {
     switch (key) {
       case 'level':
         return value.toLowerCase();
+      case 'serviceName':
+        return value;
+      case 'timestamp':
+        return value.toLowerCase() === 'true';
       case 'enableFileRotation':
       case 'enableBackwardCompatibility':
       case 'compressLogs':
@@ -270,7 +318,7 @@ export class LogConfigManager {
     const warnings: string[] = [];
 
     // Validate log level
-    if (config.level && !['trace', 'debug', 'info', 'warn', 'error', 'fatal'].includes(config.level)) {
+    if (config.level && !['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'].includes(config.level)) {
       errors.push(`Invalid log level: ${config.level}`);
     }
 
@@ -302,6 +350,29 @@ export class LogConfigManager {
       }
     }
 
+    // Validate streams if present
+    if (config.streams && Array.isArray(config.streams)) {
+      for (const [index, stream] of config.streams.entries()) {
+        // Validate stream type
+        if (stream.type && !['file', 'console', 'network', 'custom'].includes(stream.type)) {
+          errors.push(`Stream[${index}]: Invalid stream type: ${stream.type}`);
+        }
+        
+        // Validate stream level
+        if (stream.level && !['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'].includes(stream.level)) {
+          errors.push(`Stream[${index}]: Invalid stream level: ${stream.level}`);
+        }
+        
+        // Validate file stream requirements
+        if (stream.type === 'file') {
+          const filePath = (stream as any).filePath || (stream as any).path;
+          if (!filePath || typeof filePath !== 'string') {
+            errors.push(`Stream[${index}]: File stream requires filePath or path`);
+          }
+        }
+      }
+    }
+
     return {
       isValid: errors.length === 0,
       errors,
@@ -312,8 +383,15 @@ export class LogConfigManager {
   /**
    * Get the current configuration
    */
-  public getConfiguration(): LogConfig {
+  public getConfig(): LogConfig {
     return { ...this.config };
+  }
+
+  /**
+   * Get the current configuration (alias for getConfig)
+   */
+  public getConfiguration(): LogConfig {
+    return this.getConfig();
   }
 
   /**
@@ -344,13 +422,28 @@ export class LogConfigManager {
   /**
    * Update configuration with new values
    */
-  public updateConfiguration(updates: DeepPartial<LogConfig>): void {
-    this.config = this.deepMerge(this.config, updates);
-    
-    // Validate the updated configuration
-    const validation = this.validateConfiguration(this.config);
-    if (!validation.isValid) {
-      throw new Error(`Configuration update failed: ${validation.errors.join(', ')}`);
+  public async updateConfig(updates: DeepPartial<LogConfig>): Promise<Result<void, Error>> {
+    try {
+      const newConfig = this.deepMerge(this.config, updates);
+      
+      // Validate the updated configuration
+      const validation = this.validateConfiguration(newConfig);
+      if (!validation.isValid) {
+        throw new Error(`Configuration update failed: ${validation.errors.join(', ')}`);
+      }
+      
+      this.config = newConfig;
+      
+      // Trigger config change event
+      if (this.configChangeListeners) {
+        for (const listener of this.configChangeListeners) {
+          listener(this.config);
+        }
+      }
+      
+      return Ok(undefined);
+    } catch (error) {
+      return Err(error as Error);
     }
   }
 
@@ -381,7 +474,7 @@ export class LogConfigManager {
    * Get stream configuration
    */
   public getStreamConfig(): MultiStreamConfig {
-    const logConfig = this.getConfiguration();
+    const logConfig = this.getConfig();
     
     // Convert log config to stream config
     return {
@@ -417,6 +510,173 @@ export class LogConfigManager {
    */
   public hasConfigSource(source: ConfigSource): boolean {
     return this.configSources.includes(source);
+  }
+
+  /**
+   * Initialize the configuration manager
+   */
+  public async initialize(): Promise<Result<void, Error>> {
+    try {
+      // Validate current configuration
+      const validation = this.validateConfiguration(this.config);
+      if (!validation.isValid) {
+        return Err(new Error(`Configuration validation failed: ${validation.errors.join(', ')}`));
+      }
+      
+      return Ok(undefined);
+    } catch (error) {
+      return Err(error as Error);
+    }
+  }
+
+  /**
+   * Health check
+   */
+  public healthCheck(): { status: string; configSources: string[] } {
+    return {
+      status: 'healthy',
+      configSources: this.configSources,
+    };
+  }
+
+  /**
+   * Cleanup resources
+   */
+  public cleanup(): void {
+    // Clear configuration sources
+    this.configSources = [];
+    
+    // Reset to default configuration with deep copy
+    this.config = JSON.parse(JSON.stringify(DEFAULT_LOG_CONFIG));
+  }
+
+  /**
+   * Add a new stream to the configuration
+   */
+  public addStream(stream: StreamEntry): Result<void, Error> {
+    try {
+      // Add stream to config
+      if (!this.config.streams) {
+        this.config.streams = [];
+      }
+      
+      this.config.streams.push(stream);
+      
+      // Trigger stream change event
+      if (this.streamChangeListeners) {
+        for (const listener of this.streamChangeListeners) {
+          listener(this.config.streams);
+        }
+      }
+      
+      return Ok(undefined);
+    } catch (error) {
+      return Err(error as Error);
+    }
+  }
+
+  /**
+   * Remove a stream by name
+   */
+  public removeStream(name: string): Result<void, Error> {
+    try {
+      if (!this.config.streams) {
+        return Err(new Error(`Stream '${name}' not found`));
+      }
+      
+      const index = this.config.streams.findIndex(stream => stream.name === name);
+      if (index === -1) {
+        return Err(new Error(`Stream '${name}' not found`));
+      }
+      
+      this.config.streams.splice(index, 1);
+      
+      // Trigger stream change event
+      if (this.streamChangeListeners) {
+        for (const listener of this.streamChangeListeners) {
+          listener(this.config.streams);
+        }
+      }
+      
+      return Ok(undefined);
+    } catch (error) {
+      return Err(error as Error);
+    }
+  }
+
+  /**
+   * Update an existing stream
+   */
+  public updateStream(name: string, updates: Partial<StreamEntry>): Result<void, Error> {
+    try {
+      if (!this.config.streams) {
+        return Err(new Error(`Stream '${name}' not found`));
+      }
+      
+      const stream = this.config.streams.find(s => s.name === name);
+      if (!stream) {
+        return Err(new Error(`Stream '${name}' not found`));
+      }
+      
+      // Update stream properties
+      Object.assign(stream, updates);
+      
+      // Trigger stream change event
+      if (this.streamChangeListeners) {
+        for (const listener of this.streamChangeListeners) {
+          listener(this.config.streams);
+        }
+      }
+      
+      return Ok(undefined);
+    } catch (error) {
+      return Err(error as Error);
+    }
+  }
+
+  /**
+   * Get a stream by name
+   */
+  public getStream(name: string): StreamEntry | undefined {
+    if (!this.config.streams) {
+      return undefined;
+    }
+    
+    return this.config.streams.find(stream => stream.name === name);
+  }
+
+  /**
+   * Event listener for configuration changes
+   */
+  public onConfigChange(listener: (config: LogConfig) => void): void {
+    // Store the listener
+    if (!this.configChangeListeners) {
+      this.configChangeListeners = [];
+    }
+    this.configChangeListeners.push(listener);
+  }
+
+  /**
+   * Remove event listener for configuration changes
+   */
+  public offConfigChange(listener: (config: LogConfig) => void): void {
+    if (this.configChangeListeners) {
+      const index = this.configChangeListeners.indexOf(listener);
+      if (index !== -1) {
+        this.configChangeListeners.splice(index, 1);
+      }
+    }
+  }
+
+  /**
+   * Event listener for stream changes
+   */
+  public onStreamChange(listener: (streams: StreamEntry[]) => void): void {
+    // Store the listener
+    if (!this.streamChangeListeners) {
+      this.streamChangeListeners = [];
+    }
+    this.streamChangeListeners.push(listener);
   }
 
   /**

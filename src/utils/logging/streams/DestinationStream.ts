@@ -1,6 +1,6 @@
 import { Writable } from 'stream';
-import { createWriteStream, existsSync, mkdirSync, dirname } from 'fs';
-import { join } from 'path';
+import { createWriteStream, existsSync, mkdirSync } from 'fs';
+import { dirname, join } from 'path';
 import { StreamEntry } from '../types/stream-entry';
 import { Result, Ok, Err } from '../types/common';
 
