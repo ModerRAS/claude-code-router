@@ -31,18 +31,19 @@ export class DestinationStream {
         return Ok(undefined);
       }
 
-      if (!this.config.path) {
+      const filePath = this.config.path || this.config.filePath;
+      if (!filePath) {
         return Err(new Error('File path is required for destination stream'));
       }
 
       // 确保目录存在
-      const dir = dirname(this.config.path);
+      const dir = dirname(filePath);
       if (!existsSync(dir)) {
         mkdirSync(dir, { recursive: true });
       }
 
       // 创建写入流
-      this.stream = createWriteStream(this.config.path, {
+      this.stream = createWriteStream(filePath, {
         flags: 'a',
         encoding: 'utf8',
         autoClose: true,
@@ -50,7 +51,7 @@ export class DestinationStream {
 
       // 处理流错误
       this.stream.on('error', (error) => {
-        console.error(`Destination stream error for ${this.config.path}:`, error);
+        console.error(`Destination stream error for ${filePath}:`, error);
       });
 
       this.initialized = true;

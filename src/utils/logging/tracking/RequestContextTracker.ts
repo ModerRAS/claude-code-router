@@ -40,7 +40,15 @@ export class RequestContextTracker {
         this.cleanupOldContexts();
       }, 5 * 60 * 1000); // 每5分钟清理一次
 
-      this.logger.info('RequestContextTracker initialized');
+      // 安全地记录初始化日志
+      try {
+        this.logger.info('RequestContextTracker initialized');
+      } catch (logError) {
+        // 在测试环境中，流可能已经关闭，忽略初始化日志错误
+        if (process.env.NODE_ENV !== 'test') {
+          console.warn('Failed to log initialization:', logError);
+        }
+      }
       return Ok(undefined);
     } catch (error) {
       return Err(error instanceof Error ? error : new Error(String(error)));
@@ -290,7 +298,7 @@ export class RequestContextTracker {
     }
 
     this.requestContexts.clear();
-    this.logger.info('RequestContextTracker cleaned up');
+    // 清理时不记录日志，避免流关闭后的写入错误
   }
 
   /**

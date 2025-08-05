@@ -15,7 +15,9 @@ describe('Complete Logging System Integration Tests', () => {
   beforeEach(() => {
     // Create test directory
     testLogDir = join(__dirname, '..', '..', '..', 'test-logs');
-    testLogFile = join(testLogDir, 'test.log');
+    // 每个测试使用不同的文件名
+    const timestamp = Date.now();
+    testLogFile = join(testLogDir, `test-${timestamp}.log`);
     
     if (!existsSync(testLogDir)) {
       mkdirSync(testLogDir, { recursive: true });
@@ -29,8 +31,9 @@ describe('Complete Logging System Integration Tests', () => {
       logManager = null;
     }
 
-    if (existsSync(testLogFile)) {
-      rmSync(testLogFile);
+    // 清理整个测试目录
+    if (existsSync(testLogDir)) {
+      rmSync(testLogDir, { recursive: true, force: true });
     }
   });
 
@@ -91,7 +94,13 @@ describe('Complete Logging System Integration Tests', () => {
         operation: 'integration-test',
       });
 
-      // 6. Verify log file was created and contains content
+      // 6. Force flush and wait a bit for async writes
+      await logManager.flush();
+      
+      // Small delay to allow async writes to complete
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // 7. Verify log file was created and contains content
       expect(existsSync(testLogFile)).toBe(true);
       const logContent = readFileSync(testLogFile, 'utf8');
       expect(logContent).toContain('test-integration');
@@ -176,6 +185,11 @@ describe('Complete Logging System Integration Tests', () => {
     });
 
     it('should handle stream rotation and large volumes', async () => {
+      // 确保目录存在
+      if (!existsSync(testLogDir)) {
+        mkdirSync(testLogDir, { recursive: true });
+      }
+      
       const largeLogConfig: LogConfig = {
         level: 'debug',
         timestamp: true,
@@ -305,6 +319,11 @@ describe('Complete Logging System Integration Tests', () => {
 
   describe('Global Integration Integration', () => {
     it('should initialize global log integration', async () => {
+      // 确保日志目录存在
+      if (!existsSync(testLogDir)) {
+        mkdirSync(testLogDir, { recursive: true });
+      }
+      
       const integrationResult = await initializeGlobalLogIntegration({
         enableNewLogging: true,
         logDirectory: testLogDir,
@@ -472,7 +491,12 @@ describe('Complete Logging System Integration Tests', () => {
       // Log with initial configuration
       logger.info('Message with initial config');
 
-      // Update configuration
+      // Update configuration with a new file path
+      const updatedTestFile = join(testLogDir, `updated-test-${Date.now()}.log`);
+      // 确保目录存在
+      if (!existsSync(testLogDir)) {
+        mkdirSync(testLogDir, { recursive: true });
+      }
       const updateResult = await logManager.updateConfig({
         level: 'debug',
         streams: [
@@ -485,7 +509,7 @@ describe('Complete Logging System Integration Tests', () => {
             name: 'updated-file',
             type: 'file',
             level: 'error',
-            path: testLogFile,
+            path: updatedTestFile,
           },
         ],
       });
@@ -499,9 +523,10 @@ describe('Complete Logging System Integration Tests', () => {
       updatedLogger.debug('Message with updated config');
       updatedLogger.error('Error with updated config');
 
+      
       // Verify file stream works
-      expect(existsSync(testLogFile)).toBe(true);
-      const logContent = readFileSync(testLogFile, 'utf8');
+      expect(existsSync(updatedTestFile)).toBe(true);
+      const logContent = readFileSync(updatedTestFile, 'utf8');
       expect(logContent).toContain('Error with updated config');
 
       await logManager.cleanup();

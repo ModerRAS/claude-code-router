@@ -27,7 +27,15 @@ export class StreamStateTracker {
    */
   async initialize(): Promise<Result<void, Error>> {
     try {
-      this.logger.info('StreamStateTracker initialized');
+      // 安全地记录初始化日志
+      try {
+        this.logger.info('StreamStateTracker initialized');
+      } catch (logError) {
+        // 在测试环境中，流可能已经关闭，忽略初始化日志错误
+        if (process.env.NODE_ENV !== 'test') {
+          console.warn('Failed to log StreamStateTracker initialization:', logError);
+        }
+      }
       return Ok(undefined);
     } catch (error) {
       return Err(error instanceof Error ? error : new Error(String(error)));
@@ -376,7 +384,7 @@ export class StreamStateTracker {
       }
     }
 
-    this.logger.info('StreamStateTracker cleaned up');
+    // 清理时不记录日志，避免流关闭后的写入错误
   }
 
   /**

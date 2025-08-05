@@ -84,15 +84,25 @@ export class ExistingLogIntegration {
         return Err(new Error('Integration not initialized'));
       }
 
-      const logger = this.compatibility.getLogger();
-
-      // 创建新的 log 函数
+      // 创建新的 log 函数，带有错误处理
       const newLogFunction = (...args: unknown[]) => {
-        const message = args
-          .map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg))
-          .join(' ');
-        
-        logger.info(message);
+        try {
+          const message = args
+            .map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg))
+            .join(' ');
+          
+          // 安全地记录日志
+          const logger = this.compatibility!.getLogger();
+          if (typeof logger.info === 'function') {
+            logger.info(message);
+          } else {
+            // 回退到 console.log
+            console.log('Enhanced log:', message);
+          }
+        } catch (error) {
+          // 在任何情况下都不要让日志记录中断应用程序
+          console.warn('Failed to log message:', error);
+        }
       };
 
       // 这里我们可以选择性地替换全局的 log 函数
@@ -266,10 +276,6 @@ export class ExistingLogIntegration {
         type: 'file',
         level: this.config.logLevel as any,
         path: `${this.config.logDirectory}/claude-code-router.log`,
-        rotation: {
-          size: '10M',
-          interval: '1d',
-        },
       });
 
       // 添加错误日志文件
@@ -278,10 +284,6 @@ export class ExistingLogIntegration {
         type: 'file',
         level: 'error',
         path: `${this.config.logDirectory}/error.log`,
-        rotation: {
-          size: '10M',
-          interval: '1d',
-        },
       });
     }
 

@@ -446,8 +446,11 @@ export class LogManager {
         timestamp: config.timestamp ? stdTimeFunctions.isoTime : false,
       }, pino.multistream(multiStreams));
 
-      // 在测试环境中更新logger的level属性
+      // 确保在所有环境中都正确更新logger的level属性
       if (this.logger) {
+        // 使用Pino的level setter方法
+        this.logger.level = config.level;
+        // 同时更新内部属性以确保兼容性
         (this.logger as any).level = config.level;
       }
 
@@ -509,6 +512,20 @@ export class LogManager {
   }
 
   /**
+   * 刷新所有流
+   */
+  flush(): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.logger && typeof (this.logger as any).flush === 'function') {
+        (this.logger as any).flush(resolve);
+      } else {
+        // 对于没有flush方法的流，直接resolve
+        resolve();
+      }
+    });
+  }
+
+  /**
    * 获取错误历史
    */
   getErrorHistory(limit: number = 100, errorName?: string): Record<string, unknown> {
@@ -537,25 +554,33 @@ export class LogManager {
    */
   async cleanup(): Promise<void> {
     try {
-      // 清理流管理器
-      await this.streamManager.cleanup();
+      // 首先刷新所有流，确保所有日志都被写入
+      if (this.logger && typeof (this.logger as any).flush === 'function') {
+        await new Promise<void>((resolve) => {
+          (this.logger as any).flush(resolve);
+        });
+      }
 
-      // 清理请求追踪器
+      // 等待一小段时间确保异步写入完成
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // 先清理所有追踪器（它们可能还会尝试记录日志）
       if (this.requestTracker) {
         await this.requestTracker.cleanup();
       }
 
-      // 清理流状态追踪器
       if (this.streamTracker) {
         await this.streamTracker.cleanup();
       }
 
-      // 清理错误日志增强器
       if (this.errorLogger) {
         await this.errorLogger.cleanup();
       }
 
-      // 重置状态
+      // 然后清理流管理器
+      await this.streamManager.cleanup();
+
+      // 最后重置状态
       this.logger = null;
       this.requestTracker = null;
       this.streamTracker = null;

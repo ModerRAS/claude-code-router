@@ -1,5 +1,6 @@
 import { LogManager } from './LogManager';
 import { LogConfig } from './types/log-config';
+import { LogConfigManager } from './config/LogConfigManager';
 
 /**
  * 日志管理器工厂函数 - 提供便捷的创建和配置接口
@@ -15,6 +16,15 @@ import { LogConfig } from './types/log-config';
  * 创建日志管理器实例
  */
 export function createLogManager(config?: Partial<LogConfig>): LogManager {
+  // 如果提供了配置，提前进行验证
+  if (config) {
+    const tempManager = new LogConfigManager(config);
+    const validation = tempManager.validateConfiguration(config);
+    if (!validation.isValid) {
+      throw new Error(`Invalid log configuration: ${validation.errors.join(', ')}`);
+    }
+  }
+  
   return new LogManager(config);
 }
 

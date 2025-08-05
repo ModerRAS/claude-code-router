@@ -33,19 +33,20 @@ export class PinoRollStream {
         return Ok(undefined);
       }
 
-      if (!this.config.path) {
+      const filePath = this.config.path || this.config.filePath;
+      if (!filePath) {
         return Err(new Error('File path is required for rotation stream'));
       }
 
       // 确保目录存在
-      const dir = dirname(this.config.path);
+      const dir = dirname(filePath);
       if (!existsSync(dir)) {
         mkdirSync(dir, { recursive: true });
       }
 
       // 创建 pino-roll 流
       const rollConfig = this.config.rotation || {};
-      this.stream = roll(this.config.path, {
+      this.stream = roll(filePath, {
         size: rollConfig.size || '10M',
         interval: rollConfig.interval || '1d',
         mkdir: true,

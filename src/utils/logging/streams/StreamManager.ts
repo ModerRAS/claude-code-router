@@ -115,9 +115,9 @@ export class StreamManager {
    * 获取多流配置
    */
   getMultiStreams(): pino.MultiStreamRes[] {
-    return Array.from(this.streams.values()).filter(stream => 
-      this.activeStreams.has(stream.level || 'info')
-    );
+    return Array.from(this.streams.entries()).filter(([name, stream]) => 
+      this.activeStreams.has(name)
+    ).map(([name, stream]) => stream);
   }
 
   /**

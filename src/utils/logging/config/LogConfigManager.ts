@@ -293,6 +293,11 @@ export class LogConfigManager {
       const sourceValue = source[key];
       const targetValue = result[key];
 
+      // 如果sourceValue是undefined，保留targetValue
+      if (sourceValue === undefined) {
+        continue;
+      }
+
       if (
         sourceValue &&
         typeof sourceValue === 'object' &&
